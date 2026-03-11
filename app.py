@@ -199,7 +199,7 @@ st.markdown("""
 <div class="disclaimer">
 ⚠️ <strong>DISCLAIMER:</strong> This tool provides ESTIMATES only. Florida sales tax rules are complex 
 and vary by specific business activity. Some services may be partially or fully exempt. 
-<strong>Consult a CPA</strong> before filing. For official rates, visit <a href="https://floridarevenue.com/taxes/sales" target="_blank">floridarevenue.com</a>.
+<strong>Consult a CPA</strong> before filing. For official rates, visit <a href="https://floridarevenue.gov/taxes/sales" target="_blank">Florida Department of Revenue</a>.
 </div>
 """, unsafe_allow_html=True)
 
