@@ -1,12 +1,22 @@
 """
-FL Tax Shield — Florida Sales Tax Calculator + Quarterly Estimator
-MVP v0.1 | Not tax advice — consult CPA
+FL Tax Shield - Florida tax calculator helpers.
+
+These estimates are intentionally conservative and are not a substitute for
+state guidance or advice from a CPA.
 """
 
-# Florida Sales Tax Rates by County (2026)
-# Source: SalesTaxHandbook.com, updated March 2026
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+STATE_SALES_TAX_RATE = 0.06
+DEFAULT_TAXABLE_RATIO = 0.50
+DEFAULT_PROFIT_MARGIN = 0.10
+CORPORATE_TAX_RATE = 0.055
+COLLECTION_ALLOWANCE_RATE = 0.025
+COLLECTION_ALLOWANCE_MAX = 30.00
+
 COUNTY_TAX_RATES = {
-    # Major Metro Areas
     "Miami-Dade": 0.07,
     "Broward": 0.07,
     "Palm Beach": 0.07,
@@ -14,9 +24,7 @@ COUNTY_TAX_RATES = {
     "Pinellas": 0.075,
     "Orange": 0.075,
     "Lee": 0.065,
-    
-    # Other Counties
-    "Alachua": 0.085,  # Highest in state (Gainesville)
+    "Alachua": 0.085,
     "Baker": 0.07,
     "Bay": 0.075,
     "Bradford": 0.075,
@@ -78,223 +86,304 @@ COUNTY_TAX_RATES = {
     "Washington": 0.075,
 }
 
-# Business type sales tax exemptions (partial)
-# In FL, some services are exempt, some aren't
-# Source: FL Dept of Revenue, general guidance
+BUSINESS_TYPE_LABELS = {
+    "restaurant": "Restaurant",
+    "retail": "Retail",
+    "salon": "Salon",
+    "spa": "Spa",
+    "cleaning": "Cleaning",
+    "lawncare": "Lawn Care",
+    "landscaping": "Landscaping",
+    "contractor": "Contractor",
+    "consulting": "Consulting",
+    "real_estate": "Real Estate",
+    "medical": "Medical",
+    "legal": "Legal",
+    "accounting": "Accounting",
+    "e-commerce": "E-Commerce",
+    "dropshipping": "Dropshipping",
+    "hotel": "Hotel",
+    "short_term_rental": "Short-Term Rental",
+    "gym": "Gym",
+    "subscriptions": "Subscriptions",
+    "other": "Other / Mixed",
+}
+
 TAXABLE_SERVICES = {
-    "restaurant": 1.0,        # 100% taxable (food + service)
-    "retail": 1.0,            # 100% taxable (merchandise)
-    "salon": 1.0,             # 100% taxable (services)
-    "spa": 1.0,               # 100% taxable
-    "cleaning": 0.6,          # 60% taxable (some exemption on labor)
-    "lawncare": 0.0,          # 0% (agricultural exemption often applies)
-    "landscaping": 0.0,       # 0% (agricultural exemption)
-    "contractor": 0.0,        # 0% (labor exempt, materials taxable - complex)
-    "consulting": 0.0,        # 0% (professional services exempt)
-    "real_estate": 0.0,       # 0% (professional services exempt)
-    "medical": 0.0,           # 0% (medical services exempt)
-    "legal": 0.0,             # 0% (legal services exempt)
-    "accounting": 0.0,        # 0% (professional services exempt)
-    "e-commerce": 1.0,        # 100% taxable (if selling tangible goods)
-    "dropshipping": 1.0,      # 100% taxable
-    "hotel": 1.0,             # 100% (lodging + tax)
-    "short_term_rental": 1.0, # 100% (vacation rentals taxable)
-    "gym": 1.0,               # 100% (memberships taxable)
-    "subscriptions": 1.0,     # 100% (digital goods taxable)
-    "other": 0.5,             # 50% default assumption
+    "restaurant": 1.0,
+    "retail": 1.0,
+    "salon": 1.0,
+    "spa": 1.0,
+    "cleaning": 0.6,
+    "lawncare": 0.0,
+    "landscaping": 0.0,
+    "contractor": 0.0,
+    "consulting": 0.0,
+    "real_estate": 0.0,
+    "medical": 0.0,
+    "legal": 0.0,
+    "accounting": 0.0,
+    "e-commerce": 1.0,
+    "dropshipping": 1.0,
+    "hotel": 1.0,
+    "short_term_rental": 1.0,
+    "gym": 1.0,
+    "subscriptions": 1.0,
+    "other": DEFAULT_TAXABLE_RATIO,
 }
 
-# FL Corporate Income Tax Rates (2026)
-# Florida has a 5.5% corporate income tax on C-corps
-# S-corps, LLCs, sole props are pass-through (no FL income tax)
-CORPORATE_TAX_RATE = 0.055
-
-# Discount rates for early filing (FL allows this)
-EARLY_FILING_DISCOUNT = 0.005  # 0.5% discount if filed by 1st of month
-
-# Collection allowance (FL allows businesses to keep 2.5% of tax due, max $30)
-COLLECTION_ALLOWANCE_RATE = 0.025
-COLLECTION_ALLOWANCE_MAX = 30.00
-
-# Business structures (affects quarterly estimate logic)
-BUSINESS_STRUCTURES = {
-    "sole_prop": {
-        "income_tax": "pass_through",
-        "quarterly_due": "estimated_tax",
-    },
-    "LLC": {
-        "income_tax": "pass_through",
-        "quarterly_due": "estimated_tax",
-    },
-    "S_corp": {
-        "income_tax": "pass_through",
-        "quarterly_due": "estimated_tax",
-    },
-    "C_corp": {
-        "income_tax": "corporate",
-        "quarterly_due": "form_1120",
-    },
+STRUCTURE_LABELS = {
+    "sole_prop": "Sole Proprietorship",
+    "llc": "LLC",
+    "s_corp": "S-Corporation",
+    "c_corp": "C-Corporation",
 }
+
+FILING_FREQUENCY_LABELS = {
+    "monthly": "Monthly",
+    "quarterly": "Quarterly",
+    "semiannual": "Semiannual",
+    "annual": "Annual",
+}
+
+FILING_PERIODS_PER_YEAR = {
+    "monthly": 12,
+    "quarterly": 4,
+    "semiannual": 2,
+    "annual": 1,
+}
+
+
+@dataclass(frozen=True)
+class FilingPeriod:
+    label: str
+    due_window: str
+
+
+def validate_non_negative(value: float, label: str) -> float:
+    if value < 0:
+        raise ValueError(f"{label} cannot be negative.")
+    return value
+
+
+def normalize_structure(structure: str) -> str:
+    key = structure.strip().lower().replace("-", "_").replace(" ", "_")
+    if key not in STRUCTURE_LABELS:
+        raise ValueError(f"Unsupported business structure: {structure}")
+    return key
+
+
+def normalize_business_type(business_type: str) -> str:
+    key = business_type.strip().lower().replace(" ", "_")
+    if key not in TAXABLE_SERVICES:
+        return "other"
+    return key
+
+
+def normalize_filing_frequency(filing_frequency: str) -> str:
+    key = filing_frequency.strip().lower()
+    if key not in FILING_PERIODS_PER_YEAR:
+        raise ValueError(f"Unsupported filing frequency: {filing_frequency}")
+    return key
+
+
+def get_business_types() -> list[str]:
+    return list(BUSINESS_TYPE_LABELS.keys())
+
 
 def get_county_rate(county: str) -> float:
-    """Get sales tax rate for a county."""
-    return COUNTY_TAX_RATES.get(county, 0.06)  # Default to 6% state minimum
+    return COUNTY_TAX_RATES.get(county, STATE_SALES_TAX_RATE)
 
 
-def calculate_sales_tax(annual_revenue: float, county: str, business_type: str) -> dict:
-    """
-    Calculate estimated Florida sales tax owed.
-    
-    Args:
-        annual_revenue: Gross annual revenue
-        county: Florida county name
-        business_type: Type of business
-    
-    Returns:
-        Dictionary with tax breakdown
-    """
+def get_filing_periods_per_year(filing_frequency: str) -> int:
+    return FILING_PERIODS_PER_YEAR[normalize_filing_frequency(filing_frequency)]
+
+
+def build_sales_tax_schedule(filing_frequency: str, amount_per_period: float) -> list[dict[str, str | float]]:
+    frequency = normalize_filing_frequency(filing_frequency)
+
+    schedules = {
+        "monthly": [
+            FilingPeriod("January", "Feb 1-Feb 20"),
+            FilingPeriod("February", "Mar 1-Mar 20"),
+            FilingPeriod("March", "Apr 1-Apr 20"),
+            FilingPeriod("April", "May 1-May 20"),
+            FilingPeriod("May", "Jun 1-Jun 20"),
+            FilingPeriod("June", "Jul 1-Jul 20"),
+            FilingPeriod("July", "Aug 1-Aug 20"),
+            FilingPeriod("August", "Sep 1-Sep 20"),
+            FilingPeriod("September", "Oct 1-Oct 20"),
+            FilingPeriod("October", "Nov 1-Nov 20"),
+            FilingPeriod("November", "Dec 1-Dec 20"),
+            FilingPeriod("December", "Jan 1-Jan 20"),
+        ],
+        "quarterly": [
+            FilingPeriod("Q1 (Jan-Mar)", "Apr 1-Apr 20"),
+            FilingPeriod("Q2 (Apr-Jun)", "Jul 1-Jul 20"),
+            FilingPeriod("Q3 (Jul-Sep)", "Oct 1-Oct 20"),
+            FilingPeriod("Q4 (Oct-Dec)", "Jan 1-Jan 20"),
+        ],
+        "semiannual": [
+            FilingPeriod("H1 (Jan-Jun)", "Jul 1-Jul 20"),
+            FilingPeriod("H2 (Jul-Dec)", "Jan 1-Jan 20"),
+        ],
+        "annual": [
+            FilingPeriod("Calendar Year", "Jan 1-Jan 20"),
+        ],
+    }
+
+    return [
+        {
+            "period": period.label,
+            "due_window": period.due_window,
+            "amount": round(amount_per_period, 2),
+        }
+        for period in schedules[frequency]
+    ]
+
+
+def calculate_sales_tax(
+    annual_revenue: float,
+    county: str,
+    business_type: str,
+    filing_frequency: str = "quarterly",
+) -> dict:
+    annual_revenue = validate_non_negative(annual_revenue, "Annual revenue")
+    normalized_business_type = normalize_business_type(business_type)
+    normalized_frequency = normalize_filing_frequency(filing_frequency)
+
     rate = get_county_rate(county)
-    taxable_ratio = TAXABLE_SERVICES.get(business_type.lower(), 0.5)
-    
-    # Estimated taxable revenue (some services exempt)
+    taxable_ratio = TAXABLE_SERVICES[normalized_business_type]
     taxable_revenue = annual_revenue * taxable_ratio
-    
-    # Annual sales tax owed
     annual_tax = taxable_revenue * rate
-    
-    # Monthly and quarterly breakdown
-    monthly_tax = annual_tax / 12
-    quarterly_tax = annual_tax / 4
-    
+    periods_per_year = get_filing_periods_per_year(normalized_frequency)
+    filing_amount = annual_tax / periods_per_year if periods_per_year else 0.0
+
     return {
         "county": county,
         "tax_rate": rate,
-        "business_type": business_type,
+        "business_type": normalized_business_type,
+        "business_type_label": BUSINESS_TYPE_LABELS[normalized_business_type],
+        "filing_frequency": normalized_frequency,
+        "filing_frequency_label": FILING_FREQUENCY_LABELS[normalized_frequency],
+        "periods_per_year": periods_per_year,
         "taxable_ratio": taxable_ratio,
-        "annual_revenue": annual_revenue,
-        "taxable_revenue": taxable_revenue,
+        "annual_revenue": round(annual_revenue, 2),
+        "monthly_revenue": round(annual_revenue / 12, 2),
+        "taxable_revenue": round(taxable_revenue, 2),
         "annual_sales_tax": round(annual_tax, 2),
-        "monthly_sales_tax": round(monthly_tax, 2),
-        "quarterly_sales_tax": round(quarterly_tax, 2),
+        "monthly_sales_tax": round(annual_tax / 12, 2),
+        "filing_period_sales_tax": round(filing_amount, 2),
+        "schedule": build_sales_tax_schedule(normalized_frequency, filing_amount),
     }
 
 
-def calculate_corporate_tax(annual_revenue: float, structure: str) -> dict:
-    """
-    Calculate estimated Florida corporate income tax.
-    Only applies to C-corps. S-corps, LLCs, sole props are pass-through.
-    """
-    if structure.upper() in ["C_CORP", "C-CORP", "C CORP"]:
-        # Assume 10% net profit margin for estimation (conservative)
-        estimated_profit = annual_revenue * 0.10
-        annual_corporate_tax = estimated_profit * CORPORATE_TAX_RATE
-        quarterly_corporate_tax = annual_corporate_tax / 4
-        
+def calculate_corporate_tax(
+    annual_revenue: float,
+    structure: str,
+    profit_margin: float = DEFAULT_PROFIT_MARGIN,
+) -> dict:
+    annual_revenue = validate_non_negative(annual_revenue, "Annual revenue")
+    profit_margin = validate_non_negative(profit_margin, "Profit margin")
+    normalized_structure = normalize_structure(structure)
+
+    if normalized_structure != "c_corp":
         return {
-            "structure": "C-Corp",
-            "estimated_profit": estimated_profit,
-            "tax_rate": CORPORATE_TAX_RATE,
-            "annual_corporate_tax": round(annual_corporate_tax, 2),
-            "quarterly_corporate_tax": round(quarterly_corporate_tax, 2),
-            "note": "Based on estimated 10% profit margin. Consult CPA for actual."
-        }
-    else:
-        return {
-            "structure": structure,
-            "estimated_profit": 0,
-            "tax_rate": 0,
-            "annual_corporate_tax": 0,
-            "quarterly_corporate_tax": 0,
-            "note": "Pass-through entity (LLC/S-corp/Sole Prop). No FL corporate tax."
+            "structure": normalized_structure,
+            "structure_label": STRUCTURE_LABELS[normalized_structure],
+            "estimated_profit": 0.0,
+            "profit_margin": round(profit_margin, 4),
+            "tax_rate": 0.0,
+            "annual_corporate_tax": 0.0,
+            "quarterly_corporate_tax": 0.0,
+            "applies": False,
+            "note": "Pass-through entity. Florida corporate income tax typically does not apply.",
         }
 
+    estimated_profit = annual_revenue * profit_margin
+    annual_corporate_tax = estimated_profit * CORPORATE_TAX_RATE
 
-def calculate_collection_allowance(annual_tax: float) -> dict:
-    """
-    FL allows businesses to keep 2.5% of sales tax collected, max $30/filing location.
-    This is the "collection allowance" for timely filing.
-    """
-    allowance = min(annual_tax * COLLECTION_ALLOWANCE_RATE, COLLECTION_ALLOWANCE_MAX * 4)  # 4 filings/year
-    # Actually, it's per filing - so up to $30 x 4 = $120/year if filing monthly
-    # For simplicity, let's show the quarterly version
-    allowance_per_filing = min(annual_tax * COLLECTION_ALLOWANCE_RATE / 4, COLLECTION_ALLOWANCE_MAX)
-    
     return {
-        "annual_allowance": round(allowance, 2),
-        "per_filing_allowance": round(allowance_per_filing, 2),
-        "note": "FL allows keeping 2.5% of tax due (max $30) per filing period for timely filing."
+        "structure": normalized_structure,
+        "structure_label": STRUCTURE_LABELS[normalized_structure],
+        "estimated_profit": round(estimated_profit, 2),
+        "profit_margin": round(profit_margin, 4),
+        "tax_rate": CORPORATE_TAX_RATE,
+        "annual_corporate_tax": round(annual_corporate_tax, 2),
+        "quarterly_corporate_tax": round(annual_corporate_tax / 4, 2),
+        "applies": True,
+        "note": "Estimate only. Corporate tax uses the profit margin you selected.",
     }
 
 
-def generate_report(revenue: float, county: str, structure: str, business_type: str) -> str:
-    """Generate a formatted tax report with sales tax + corporate tax + allowances."""
-    calc = calculate_sales_tax(revenue, county, business_type)
-    corp_tax = calculate_corporate_tax(revenue, structure)
-    allowance = calculate_collection_allowance(calc['annual_sales_tax'])
-    
-    # Total estimated tax
-    total_annual = calc['annual_sales_tax'] + corp_tax['annual_corporate_tax'] - allowance['annual_allowance']
-    total_quarterly = calc['quarterly_sales_tax'] + corp_tax['quarterly_corporate_tax'] - allowance['per_filing_allowance']
-    
-    report = f"""
-╔══════════════════════════════════════════════════════════════╗
-║              FL TAX SHIELD — Tax Estimate Report              ║
-╠══════════════════════════════════════════════════════════════╣
-║ BUSINESS: {business_type.upper():<48} ║
-║ STRUCTURE: {structure.upper():<46} ║
-║ COUNTY: {county:<55} ║
-╚══════════════════════════════════════════════════════════════╝
+def calculate_collection_allowance(annual_tax: float, filing_frequency: str = "quarterly") -> dict:
+    annual_tax = validate_non_negative(annual_tax, "Annual sales tax")
+    periods_per_year = get_filing_periods_per_year(filing_frequency)
+    period_tax = annual_tax / periods_per_year if periods_per_year else 0.0
+    allowance_per_filing = min(period_tax * COLLECTION_ALLOWANCE_RATE, COLLECTION_ALLOWANCE_MAX)
 
-📊 REVENUE & TAXABLE BASE
-──────────────────────────────────────────────────────────────
-  Annual Revenue:        ${revenue:>12,.2f}
-  Taxable Ratio:         {calc['taxable_ratio']:>12.0%}
-  Taxable Revenue:       ${calc['taxable_revenue']:>12,.2f}
-
-💰 FLORIDA SALES TAX
-──────────────────────────────────────────────────────────────
-  Tax Rate ({county}):     {calc['tax_rate']*100:>10.1f}%
-  Annual Sales Tax:       ${calc['annual_sales_tax']:>12,.2f}
-  Monthly Estimate:       ${calc['monthly_sales_tax']:>12,.2f}
-  Quarterly Payments:     ${calc['quarterly_sales_tax']:>12,.2f}
-
-📅 QUARTERLY PAYMENT SCHEDULE
-──────────────────────────────────────────────────────────────
-  Q1 (Apr 15):            ${calc['quarterly_sales_tax']:>12,.2f}
-  Q2 (Jun 15):            ${calc['quarterly_sales_tax']:>12,.2f}
-  Q3 (Sep 15):            ${calc['quarterly_sales_tax']:>12,.2f}
-  Q4 (Jan 15):            ${calc['quarterly_sales_tax']:>12,.2f}
-
-⚠️  DISCLAIMER
-──────────────────────────────────────────────────────────────
-  This is an ESTIMATE only. Florida sales tax rules are complex
-  and vary by specific business activity. Some services may be
-  partially or fully exempt. Consult a CPA before filing.
-  
-  For official rates: floridarevenue.com/taxes/sales
-"""
-    return report
+    return {
+        "filing_frequency": normalize_filing_frequency(filing_frequency),
+        "periods_per_year": periods_per_year,
+        "per_filing_allowance": round(allowance_per_filing, 2),
+        "annual_allowance": round(allowance_per_filing * periods_per_year, 2),
+        "note": "Florida allows a timely-filing collection allowance of 2.5% of tax due, capped at $30 per return.",
+    }
 
 
-# ─────────────────────────────────────────────────────────────────
-# Example Usage
-# ─────────────────────────────────────────────────────────────────
+def generate_report(
+    annual_revenue: float,
+    county: str,
+    structure: str,
+    business_type: str,
+    filing_frequency: str = "quarterly",
+    profit_margin: float = DEFAULT_PROFIT_MARGIN,
+) -> str:
+    sales_tax = calculate_sales_tax(annual_revenue, county, business_type, filing_frequency)
+    corporate_tax = calculate_corporate_tax(annual_revenue, structure, profit_margin)
+    allowance = calculate_collection_allowance(
+        sales_tax["annual_sales_tax"],
+        sales_tax["filing_frequency"],
+    )
+
+    lines = [
+        "FL TAX SHIELD - Tax Estimate Report",
+        "=" * 40,
+        f"County: {county}",
+        f"Business type: {sales_tax['business_type_label']}",
+        f"Structure: {corporate_tax['structure_label']}",
+        f"Annual revenue: ${annual_revenue:,.2f}",
+        f"Taxable revenue: ${sales_tax['taxable_revenue']:,.2f}",
+        f"Sales tax rate: {sales_tax['tax_rate'] * 100:.2f}%",
+        f"Annual sales tax: ${sales_tax['annual_sales_tax']:,.2f}",
+        (
+            f"{sales_tax['filing_frequency_label']} sales tax filing estimate: "
+            f"${sales_tax['filing_period_sales_tax']:,.2f}"
+        ),
+        f"Annual collection allowance: ${allowance['annual_allowance']:,.2f}",
+        f"Annual corporate tax: ${corporate_tax['annual_corporate_tax']:,.2f}",
+        (
+            "Net estimated annual tax: "
+            f"${sales_tax['annual_sales_tax'] + corporate_tax['annual_corporate_tax'] - allowance['annual_allowance']:,.2f}"
+        ),
+        "",
+        "Sales tax filing schedule:",
+    ]
+
+    for item in sales_tax["schedule"]:
+        lines.append(
+            f"- {item['period']}: ${item['amount']:,.2f} due {item['due_window']}"
+        )
+
+    lines.extend(
+        [
+            "",
+            "Disclaimer: This tool provides estimates only. Consult a CPA and the Florida Department of Revenue for official guidance.",
+        ]
+    )
+
+    return "\n".join(lines)
+
 
 if __name__ == "__main__":
-    # Example 1: Restaurant in Miami-Dade
-    print("=" * 60)
-    print("EXAMPLE 1: Restaurant in Miami-Dade, $200k revenue")
-    print("=" * 60)
-    print(generate_report(200000, "Miami-Dade", "LLC", "restaurant"))
-    
-    # Example 2: Cleaning business in Orange County (Orlando)
-    print("\n" + "=" * 60)
-    print("EXAMPLE 2: Cleaning business in Orange County, $75k")
-    print("=" * 60)
-    print(generate_report(75000, "Orange", "sole_prop", "cleaning"))
-    
-    # Example 3: Retail store in Broward
-    print("\n" + "=" * 60)
-    print("EXAMPLE 3: Retail store in Broward, $350k revenue")
-    print("=" * 60)
-    print(generate_report(350000, "Broward", "LLC", "retail"))
+    print(generate_report(120000, "Miami-Dade", "llc", "restaurant"))

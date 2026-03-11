@@ -1,227 +1,220 @@
-"""
-FL Tax Shield — Streamlit UI
-Florida Sales Tax Calculator & Quarterly Estimator
-"""
+"""Streamlit app for Florida tax estimate planning."""
+
+from __future__ import annotations
 
 import streamlit as st
+
 from calculator import (
+    BUSINESS_TYPE_LABELS,
     COUNTY_TAX_RATES,
-    TAXABLE_SERVICES,
-    calculate_sales_tax,
-    calculate_corporate_tax,
+    DEFAULT_PROFIT_MARGIN,
+    FILING_FREQUENCY_LABELS,
+    STRUCTURE_LABELS,
     calculate_collection_allowance,
+    calculate_corporate_tax,
+    calculate_sales_tax,
+    get_business_types,
 )
 
-# Page config
-st.set_page_config(
-    page_title="FL Tax Shield",
-    page_icon="🛡️",
-    layout="wide"
-)
 
-# Custom CSS
-st.markdown("""
+st.set_page_config(page_title="FL Tax Shield", page_icon="Shield", layout="wide")
+
+st.markdown(
+    """
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1e3a5f;
-        text-align: center;
-        margin-bottom: 1rem;
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
     }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #2c5282;
-    }
-    .tax-card {
-        background-color: #f7fafc;
+    .hero {
+        background: linear-gradient(135deg, #f3f7ff 0%, #dbeafe 55%, #e0f2fe 100%);
+        border: 1px solid #bfdbfe;
+        border-radius: 20px;
         padding: 1.5rem;
-        border-radius: 10px;
-        border-left: 5px solid #3182ce;
-        margin: 1rem 0;
+        margin-bottom: 1.25rem;
     }
-    .disclaimer {
-        background-color: #fffaf0;
-        padding: 1rem;
-        border-radius: 5px;
-        border-left: 5px solid #dd6b20;
-        font-size: 0.9rem;
+    .hero h1 {
+        color: #0f172a;
+        margin-bottom: 0.3rem;
     }
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: bold;
-        color: #2d3748;
+    .hero p {
+        color: #334155;
+        font-size: 1rem;
+        margin-bottom: 0;
     }
-    .highlight {
-        color: #e53e3e;
-        font-weight: bold;
+    .note-card {
+        background: #fff7ed;
+        border-left: 4px solid #f97316;
+        border-radius: 12px;
+        padding: 0.9rem 1rem;
+        color: #7c2d12;
+        margin-top: 1rem;
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# Header
-st.markdown('<p class="main-header">🛡️ FL Tax Shield</p>', unsafe_allow_html=True)
-st.markdown("### Florida Sales Tax Calculator & Quarterly Estimator")
-st.markdown("---")
 
-# Sidebar - Input Section
+def money(value: float) -> str:
+    return f"${value:,.2f}"
+
+
+def build_county_rows() -> list[dict[str, str | float]]:
+    return [
+        {"County": county, "Rate": f"{rate * 100:.2f}%", "Numeric Rate": rate}
+        for county, rate in sorted(COUNTY_TAX_RATES.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+st.markdown(
+    """
+<div class="hero">
+    <h1>FL Tax Shield</h1>
+    <p>Estimate Florida sales tax, filing cadence, and C-corp exposure with cleaner assumptions and clearer quarterly planning.</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
 with st.sidebar:
-    st.header("📋 Business Details")
-    
-    # County selection
-    counties = sorted(COUNTY_TAX_RATES.keys())
+    st.header("Business Inputs")
+
+    counties = sorted(COUNTY_TAX_RATES)
     selected_county = st.selectbox(
-        "Select Florida County",
+        "Florida county",
         counties,
         index=counties.index("Miami-Dade") if "Miami-Dade" in counties else 0,
-        help="Select your business location in Florida"
     )
-    
-    # Business type selection (full list from calculator)
-    business_types = [
-        "restaurant", "retail", "salon", "spa", 
-        "cleaning", "lawncare", "contractor", "consulting",
-        "e-commerce", "hotel", "short_term_rental", "gym", "other"
-    ]
-    selected_business = st.selectbox(
-        "Business Type",
-        business_types,
-        index=0,
-        help="Affects taxable revenue ratio"
+
+    business_type = st.selectbox(
+        "Business type",
+        get_business_types(),
+        format_func=lambda value: BUSINESS_TYPE_LABELS[value],
     )
-    
-    # Monthly revenue input
+
     monthly_revenue = st.number_input(
-        "Monthly Revenue ($)",
+        "Monthly gross revenue",
         min_value=0.0,
-        max_value=100_000_000.0,
         value=10000.0,
         step=500.0,
-        format="%.2f"
+        format="%.2f",
     )
-    
-    # Annualize
-    annual_revenue = monthly_revenue * 12
-    
-    st.markdown("---")
-    
-    # Business structure (affects corporate tax)
+
     entity_type = st.selectbox(
-        "Business Structure",
-        ["sole_prop", "LLC", "S_corp", "C_corp"],
-        index=1,
-        format_func=lambda x: {"sole_prop": "Sole Proprietorship", "LLC": "LLC", "S_corp": "S-Corporation", "C_corp": "C-Corporation"}[x],
-        help="LLC/S-corp/sole prop are pass-through (no FL corporate tax)"
+        "Business structure",
+        list(STRUCTURE_LABELS.keys()),
+        index=list(STRUCTURE_LABELS.keys()).index("llc"),
+        format_func=lambda value: STRUCTURE_LABELS[value],
     )
-    
-    st.markdown("---")
-    st.markdown(f"**Annual Revenue:** ${annual_revenue:,.2f}")
 
-# Main content area
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.markdown("### 📊 Tax Breakdown")
-    
-    if monthly_revenue > 0:
-        # Calculate taxes
-        sales_tax = calculate_sales_tax(annual_revenue, selected_county, selected_business)
-        corp_tax = calculate_corporate_tax(annual_revenue, entity_type)
-        allowance = calculate_collection_allowance(sales_tax['annual_sales_tax'])
-        
-        # Display main metrics
-        st.markdown('<div class="tax-card">', unsafe_allow_html=True)
-        
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric(
-                "Monthly Sales Tax",
-                f"${sales_tax['monthly_sales_tax']:,.2f}",
-                help=f"Based on {sales_tax['tax_rate']*100:.1f}% rate in {selected_county}"
-            )
-        with m2:
-            st.metric(
-                "Quarterly Estimate",
-                f"${sales_tax['quarterly_sales_tax']:,.2f}",
-                help="Due April 15, June 15, Sept 15, Jan 15"
-            )
-        with m3:
-            if entity_type == "C_corp":
-                st.metric(
-                    "Annual FL Corporate Tax",
-                    f"${corp_tax['annual_corporate_tax']:,.2f}",
-                    help="5.5% FL corporate income tax"
-                )
-            else:
-                st.metric(
-                    "Annual Sales Tax",
-                    f"${sales_tax['annual_sales_tax']:,.2f}",
-                    delta=f"Taxable: ${sales_tax['taxable_revenue']:,.0f}",
-                    delta_color="off"
-                )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Detailed breakdown
-        st.markdown("### 📋 Detailed Breakdown")
-        
-        with st.expander("View Full Breakdown", expanded=True):
-            st.write(f"**County:** {selected_county}")
-            st.write(f"**Tax Rate:** {sales_tax['tax_rate']*100:.1f}%")
-            st.write(f"**Business Type:** {selected_business.title()}")
-            st.write(f"**Taxable Ratio:** {sales_tax['taxable_ratio']*100:.0f}%")
-            st.write(f"**Annual Revenue:** ${annual_revenue:,.2f}")
-            st.write(f"**Taxable Revenue:** ${sales_tax['taxable_revenue']:,.2f}")
-        
-        # Quarterly schedule
-        st.markdown("### 📅 Quarterly Payment Schedule")
-        
-        quarters = [
-            ("Q1", "April 15", sales_tax['quarterly_sales_tax']),
-            ("Q2", "June 15", sales_tax['quarterly_sales_tax']),
-            ("Q3", "September 15", sales_tax['quarterly_sales_tax']),
-            ("Q4", "January 15", sales_tax['quarterly_sales_tax']),
-        ]
-        
-        for q, date, amount in quarters:
-            st.write(f"**{q}** ({date}): ${amount:,.2f}")
-        
-        # Collection allowance
-        st.markdown("### 💡 Collection Allowance")
-        st.info(f"FL allows keeping 2.5% of tax collected (max $30) per filing = **${allowance['per_filing_allowance']:.2f}/quarter** if filed on time.")
-
-with col2:
-    st.markdown("### 🗺️ County Tax Rates")
-    
-    # Show rates for selected and nearby counties
-    rate_data = []
-    for county, rate in sorted(COUNTY_TAX_RATES.items(), key=lambda x: x[1], reverse=True):
-        rate_data.append({"County": county, "Rate": f"{rate*100:.1f}%"})
-    
-    # Display top 10 rates
-    st.dataframe(
-        rate_data[:10],
-        hide_index=True,
-        use_container_width=True
+    filing_frequency = st.selectbox(
+        "Sales tax filing frequency",
+        list(FILING_FREQUENCY_LABELS.keys()),
+        index=list(FILING_FREQUENCY_LABELS.keys()).index("quarterly"),
+        format_func=lambda value: FILING_FREQUENCY_LABELS[value],
+        help="Florida assigns filing frequency based on expected collections. This selector changes the schedule and allowance estimate.",
     )
-    
-    with st.expander("All 67 Counties"):
-        st.dataframe(
-            rate_data,
-            hide_index=True,
-            use_container_width=True
+
+    profit_margin = st.slider(
+        "Estimated profit margin for C-corp tax",
+        min_value=0.0,
+        max_value=0.5,
+        value=DEFAULT_PROFIT_MARGIN,
+        step=0.01,
+        format="%.0f%%",
+        help="Only used when the business structure is C-corporation.",
+    )
+
+annual_revenue = monthly_revenue * 12
+sales_tax = calculate_sales_tax(annual_revenue, selected_county, business_type, filing_frequency)
+corporate_tax = calculate_corporate_tax(annual_revenue, entity_type, profit_margin)
+allowance = calculate_collection_allowance(sales_tax["annual_sales_tax"], filing_frequency)
+net_annual_tax = (
+    sales_tax["annual_sales_tax"]
+    + corporate_tax["annual_corporate_tax"]
+    - allowance["annual_allowance"]
+)
+
+top_left, top_right = st.columns([1.7, 1.1])
+
+with top_left:
+    st.subheader("Estimate Snapshot")
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Annual revenue", money(annual_revenue))
+    metric_cols[1].metric("Annual sales tax", money(sales_tax["annual_sales_tax"]))
+    metric_cols[2].metric(
+        f"{sales_tax['filing_frequency_label']} filing",
+        money(sales_tax["filing_period_sales_tax"]),
+    )
+    metric_cols[3].metric("Net annual estimate", money(net_annual_tax))
+
+    detail_cols = st.columns(3)
+    detail_cols[0].metric("Taxable revenue", money(sales_tax["taxable_revenue"]))
+    detail_cols[1].metric(
+        "Collection allowance",
+        money(allowance["annual_allowance"]),
+        help=allowance["note"],
+    )
+    detail_cols[2].metric(
+        "Annual corporate tax",
+        money(corporate_tax["annual_corporate_tax"]),
+        help=corporate_tax["note"],
+    )
+
+    st.subheader("Tax Basis")
+    st.write(f"County rate: **{sales_tax['tax_rate'] * 100:.2f}%**")
+    st.write(f"Business type assumption: **{sales_tax['business_type_label']}**")
+    st.write(f"Taxable ratio assumption: **{sales_tax['taxable_ratio'] * 100:.0f}%** of gross revenue")
+    st.write(f"Sales tax filing cadence: **{sales_tax['filing_frequency_label']}**")
+    st.write(f"Business structure: **{corporate_tax['structure_label']}**")
+
+    if corporate_tax["applies"]:
+        st.info(
+            "C-corp tax estimate uses your selected profit margin rather than assuming all revenue is taxable income."
         )
+    else:
+        st.success("Florida corporate income tax is not estimated for pass-through entities in this tool.")
 
-# Disclaimer
-st.markdown("---")
-st.markdown("""
-<div class="disclaimer">
-⚠️ <strong>DISCLAIMER:</strong> This tool provides ESTIMATES only. Florida sales tax rules are complex 
-and vary by specific business activity. Some services may be partially or fully exempt. 
-<strong>Consult a CPA</strong> before filing. For official rates, visit <a href="https://floridarevenue.gov/taxes/sales" target="_blank">Florida Department of Revenue</a>.
+with top_right:
+    st.subheader("Filing Schedule")
+    st.dataframe(sales_tax["schedule"], hide_index=True, use_container_width=True)
+    st.markdown(
+        f"""
+<div class="note-card">
+    Timely filing allowance estimate: <strong>{money(allowance['per_filing_allowance'])}</strong> per return,<br>
+    capped at $30 each filing period.
 </div>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
-# Footer
+st.subheader("Annual View")
+annual_chart_rows = [
+    {"Category": "Sales tax", "Amount": sales_tax["annual_sales_tax"]},
+    {"Category": "Corporate tax", "Amount": corporate_tax["annual_corporate_tax"]},
+    {"Category": "Collection allowance", "Amount": -allowance["annual_allowance"]},
+]
+st.bar_chart(annual_chart_rows, x="Category", y="Amount", horizontal=False)
+
+county_col, assumptions_col = st.columns([1.2, 1])
+
+with county_col:
+    st.subheader("County Rates")
+    st.dataframe(build_county_rows(), hide_index=True, use_container_width=True)
+
+with assumptions_col:
+    st.subheader("Assumptions and Limits")
+    st.markdown(
+        """
+- Sales tax is estimated from county rate times the modeled taxable share of revenue.
+- Collection allowance is based on filing frequency and Florida's $30 per return cap.
+- Corporate income tax is only modeled for C-corporations.
+- This app does not replace product-level taxability rules, exemptions, or nexus analysis.
+"""
+    )
+
 st.markdown("---")
-st.markdown("*FL Tax Shield v0.1 — Not tax advice. Consult a CPA.*")
+st.caption(
+    "Estimate only. Confirm taxability, filing frequency, and official rates with the Florida Department of Revenue or a CPA before filing."
+)
