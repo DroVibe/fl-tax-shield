@@ -77,10 +77,11 @@ with st.sidebar:
         help="Select your business location in Florida"
     )
     
-    # Business type selection (only show the main 9 as mentioned)
+    # Business type selection (full list from calculator)
     business_types = [
         "restaurant", "retail", "salon", "spa", 
-        "cleaning", "lawncare", "contractor", "consulting", "other"
+        "cleaning", "lawncare", "contractor", "consulting",
+        "e-commerce", "hotel", "short_term_rental", "gym", "other"
     ]
     selected_business = st.selectbox(
         "Business Type",
@@ -103,6 +104,17 @@ with st.sidebar:
     annual_revenue = monthly_revenue * 12
     
     st.markdown("---")
+    
+    # Business structure (affects corporate tax)
+    entity_type = st.selectbox(
+        "Business Structure",
+        ["sole_prop", "LLC", "S_corp", "C_corp"],
+        index=1,
+        format_func=lambda x: {"sole_prop": "Sole Proprietorship", "LLC": "LLC", "S_corp": "S-Corporation", "C_corp": "C-Corporation"}[x],
+        help="LLC/S-corp/sole prop are pass-through (no FL corporate tax)"
+    )
+    
+    st.markdown("---")
     st.markdown(f"**Annual Revenue:** ${annual_revenue:,.2f}")
 
 # Main content area
@@ -114,7 +126,7 @@ with col1:
     if monthly_revenue > 0:
         # Calculate taxes
         sales_tax = calculate_sales_tax(annual_revenue, selected_county, selected_business)
-        corp_tax = calculate_corporate_tax(annual_revenue, "LLC")  # Default to LLC
+        corp_tax = calculate_corporate_tax(annual_revenue, entity_type)
         allowance = calculate_collection_allowance(sales_tax['annual_sales_tax'])
         
         # Display main metrics
@@ -134,12 +146,19 @@ with col1:
                 help="Due April 15, June 15, Sept 15, Jan 15"
             )
         with m3:
-            st.metric(
-                "Annual Sales Tax",
-                f"${sales_tax['annual_sales_tax']:,.2f}",
-                delta=f"Taxable: ${sales_tax['taxable_revenue']:,.0f}",
-                delta_color="off"
-            )
+            if entity_type == "C_corp":
+                st.metric(
+                    "Annual FL Corporate Tax",
+                    f"${corp_tax['annual_corporate_tax']:,.2f}",
+                    help="5.5% FL corporate income tax"
+                )
+            else:
+                st.metric(
+                    "Annual Sales Tax",
+                    f"${sales_tax['annual_sales_tax']:,.2f}",
+                    delta=f"Taxable: ${sales_tax['taxable_revenue']:,.0f}",
+                    delta_color="off"
+                )
         
         st.markdown('</div>', unsafe_allow_html=True)
         
