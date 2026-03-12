@@ -136,31 +136,26 @@ net_annual_tax = (
     - allowance["annual_allowance"]
 )
 
-top_left, top_right = st.columns([1.7, 1.1])
+top_left, top_right = st.columns([2, 1], gap="large")
 
 with top_left:
-    st.subheader("Estimate Snapshot")
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Annual revenue", money(annual_revenue))
-    metric_cols[1].metric("Annual sales tax", money(sales_tax["annual_sales_tax"]))
-    metric_cols[2].metric(
-        f"{sales_tax['filing_frequency_label']} filing",
-        money(sales_tax["filing_period_sales_tax"]),
-    )
-    metric_cols[3].metric("Net annual estimate", money(net_annual_tax))
+    st.subheader("📊 Estimate Snapshot")
+    col1, col2 = st.columns(2, gap="large")
+    with col1:
+        st.metric("Annual Revenue", money(annual_revenue))
+        st.metric("Sales Tax (Annual)", money(sales_tax["annual_sales_tax"]))
+    with col2:
+        st.metric(f"{sales_tax['filing_frequency_label']} Filing", money(sales_tax["filing_period_sales_tax"]))
+        st.metric("Net Annual Estimate", money(net_annual_tax), delta_color="inverse")
 
-    detail_cols = st.columns(3)
-    detail_cols[0].metric("Taxable revenue", money(sales_tax["taxable_revenue"]))
-    detail_cols[1].metric(
-        "Collection allowance",
-        money(allowance["annual_allowance"]),
-        help=allowance["note"],
-    )
-    detail_cols[2].metric(
-        "Annual corporate tax",
-        money(corporate_tax["annual_corporate_tax"]),
-        help=corporate_tax["note"],
-    )
+    st.subheader("📋 Tax Details")
+    d1, d2, d3 = st.columns(3, gap="large")
+    with d1:
+        st.metric("Taxable Revenue", money(sales_tax["taxable_revenue"]))
+    with d2:
+        st.metric("Collection Allowance", money(allowance["annual_allowance"]), help=allowance["note"])
+    with d3:
+        st.metric("Corporate Tax", money(corporate_tax["annual_corporate_tax"]), help=corporate_tax["note"])
 
     st.subheader("Tax Basis")
     st.write(f"County rate: **{sales_tax['tax_rate'] * 100:.2f}%**")
