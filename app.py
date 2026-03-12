@@ -178,7 +178,7 @@ with top_left:
 
 with top_right:
     st.subheader("Filing Schedule")
-    st.dataframe(sales_tax["schedule"], hide_index=True, use_container_width=True)
+    st.dataframe(sales_tax["schedule"], hide_index=True, width='stretch')
     st.markdown(
         f"""
 <div class="note-card">
@@ -201,7 +201,7 @@ county_col, assumptions_col = st.columns([1.2, 1])
 
 with county_col:
     st.subheader("County Rates")
-    st.dataframe(build_county_rows(), hide_index=True, use_container_width=True)
+    st.dataframe(build_county_rows(), hide_index=True, width='stretch')
 
 with assumptions_col:
     st.subheader("Assumptions and Limits")
